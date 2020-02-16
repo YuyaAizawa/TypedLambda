@@ -49,23 +49,23 @@ suite =
 
   , describe "parse"
     [ test "S" <| \_ ->
-      parse "λx y z.x z(y z)"
+      fromString "λx y z.x z(y z)"
         |> Expect.equal (Ok s)
 
     , test "K" <| \_ ->
-      parse "λx y.x"
+      fromString "λx y.x"
         |> Expect.equal (Ok k)
 
     , test "I" <| \_ ->
-      parse "λx.x"
+      fromString "λx.x"
         |> Expect.equal (Ok i)
 
     , test "Y" <| \_ ->
-      parse "λf.(λx.f(x x))(λx.f(x x))"
+      fromString "λf.(λx.f(x x))(λx.f(x x))"
         |> Expect.equal (Ok y)
 
     , test "SUCC" <| \_ ->
-      parse "λn f x.f(n f x)"
+      fromString "λn f x.f(n f x)"
         |> Expect.equal (Ok succ)
     ]
 

@@ -3,10 +3,10 @@ module TypedLambda exposing
   , alphaEq
   , eval
   , toString
-  , parse
+  , fromString
   )
 
-import Peg.Parser as Peg exposing (Parser)
+import Ast exposing (Ast)
 
 type Term
   = Id Int -- de Bruijn index
@@ -188,116 +188,30 @@ indexToName ctx idx =
     ( _ :: tl, n ) -> indexToName tl (n-1)
     ( [], n ) -> String.fromInt n
 
-parse : String -> Result String Term
-parse src =
-  case Peg.parse src parser of
-    Nothing -> Err "Parse Error"
-    Just ast -> ast |> termFromAst
-
-termFromAst : Ast -> Result String Term
-termFromAst ast =
+fromString : String -> Result String Term
+fromString src =
   let
     withContext ctx ast_ =
       case ast_ of
-        AstId name ->
+        Ast.Id name ->
           case getId name ctx of
             Nothing ->
               Err <| "Missing identifier: " ++ name
             Just id ->
               Ok <| Id id
 
-        AstAbs var exp ->
+        Ast.Abs var exp ->
           let
             inner = withContext (var::ctx) exp
           in
             Result.map (Abs var) inner
 
-        AstApp lAst rAst ->
+        Ast.App lAst rAst ->
           let
             lExp = withContext ctx lAst
             rExp = withContext ctx rAst
           in
             Result.map2 App lExp rExp
   in
-    withContext [] ast
-
-
-type Ast
-  = AstId String
-  | AstAbs String Ast
-  | AstApp Ast Ast
-
-parser : Parser Ast
-parser =
-  pAst
-
-pSp =
-  Peg.char (\c -> List.member c spChars)
-    |> Peg.oneOrMore
-spChars =
-  [' ', '\t']
-
-pOpSp = Peg.option pSp
-
-pLambda = Peg.match "λ"
-pDot = Peg.match "."
-pLParen = Peg.match "("
-pRParen = Peg.match ")"
-
-pName =
-  Peg.seq2
-  pNameHead pNameTail
-  (\hd tl -> String.fromList (hd :: tl))
-pNameHead =
-  Peg.char Char.isAlpha
-pNameTail =
-  Peg.char (\c -> Char.isAlphaNum c || c == '_')
-    |> Peg.zeroOrMore
-
-pId =
-  pName |> Peg.map AstId
-
-pAbs =
-  Peg.seq4
-  pLambda (Peg.join pSp pName) pDot pAst
-  (\_ vars _ inner ->
-    List.foldr
-    (\var inner_ -> AstAbs var inner_)
-    inner
-    vars
-  )
-
-pApp =
-  let
-    pParen =
-      Peg.intersperseSeq3 pOpSp
-      pLParen pAst pRParen
-      (\_ inner _ -> inner)
-
-    pAExpHd =
-      Peg.choice
-      [ \_ -> pId
-      , \_ -> pParen
-      ]
-
-    pAExpTl =
-      Peg.choice
-      [ \_ -> Peg.seq2 pSp pId (\_ p -> p)
-      , \_ -> Peg.seq2 pOpSp pParen (\_ p -> p)
-      ]
-  in
-    Peg.seq3
-    pAExpHd pAExpTl (Peg.zeroOrMore pAExpTl)
-    (\first second rest ->
-      List.foldl
-      (\exp app -> AstApp app exp)
-      (AstApp first second)
-      rest
-    )
-
-pAst =
-  Peg.choice
-  [ \_ -> pApp
-  , \_ -> pId
-  , \_ -> pAbs
-  ]
+    Ast.parse src
+      |> Result.andThen (withContext [])
