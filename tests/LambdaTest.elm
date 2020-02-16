@@ -24,12 +24,12 @@ suite =
       [ test "S" <| \_ ->
           s
             |> toString
-            |> Expect.equal "λxyz.xz(yz)"
+            |> Expect.equal "λx y z.x z(y z)"
 
       , test "K" <| \_ ->
           k
             |> toString
-            |> Expect.equal "λxy.x"
+            |> Expect.equal "λx y.x"
 
       , test "I" <| \_ ->
           i
@@ -39,13 +39,35 @@ suite =
       , test "Y" <| \_ ->
           y
             |> toString
-            |> Expect.equal "λf.(λx.f(xx))(λx.f(xx))"
+            |> Expect.equal "λf.(λx.f(x x))(λx.f(x x))"
 
       , test "SUCC" <| \_ ->
           succ
             |> toString
-            |> Expect.equal "λnfx.f(nfx)"
+            |> Expect.equal "λn f x.f(n f x)"
       ]
+
+  , describe "parse"
+    [ test "S" <| \_ ->
+      parse "λx y z.x z(y z)"
+        |> Expect.equal (Ok s)
+
+    , test "K" <| \_ ->
+      parse "λx y.x"
+        |> Expect.equal (Ok k)
+
+    , test "I" <| \_ ->
+      parse "λx.x"
+        |> Expect.equal (Ok i)
+
+    , test "Y" <| \_ ->
+      parse "λf.(λx.f(x x))(λx.f(x x))"
+        |> Expect.equal (Ok y)
+
+    , test "SUCC" <| \_ ->
+      parse "λn f x.f(n f x)"
+        |> Expect.equal (Ok succ)
+    ]
 
   , describe "eval"
     [ test "IS" <| \_ ->
