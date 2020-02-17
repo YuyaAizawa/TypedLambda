@@ -12,9 +12,9 @@ type Term
   = Id Int -- de Bruijn index
   | Abs String Term -- variable name hint, content
   | App Term Term -- lhs, rhs
-  --| TmTrue
-  --| TmFalse
-  --| TmIf Term Term Term
+  | TmTrue
+  | TmFalse
+  | TmIf Term Term Term
 
 alphaEq : Term -> Term -> Bool
 alphaEq lhs rhs =
@@ -22,6 +22,9 @@ alphaEq lhs rhs =
     ( Id l, Id r ) -> l == r
     ( Abs _ l, Abs _ r ) -> alphaEq l r
     ( App ll lr, App rl rr ) -> alphaEq ll rl && alphaEq lr rr
+    ( TmTrue, TmTrue ) -> True
+    ( TmFalse, TmFalse ) -> True
+    ( TmIf lc lt lf , TmIf rc rt rf ) -> alphaEq lc rc && alphaEq lt rt && alphaEq lf rf
     _ -> False
 
 type alias NamingContext = List String
@@ -75,12 +78,23 @@ evalStep exp =
           evalStep t1
             |> Maybe.map (\t1_ -> App t1_ t2)
 
-      _ -> Nothing
+      TmIf TmTrue t _ ->
+        Just t
 
+      TmIf TmFalse _ t ->
+        Just t
+
+      TmIf c t f ->
+        evalStep c
+          |> Maybe.map (\c_ -> TmIf c_ t f)
+
+      _ -> Nothing
 
 isValue exp =
   case exp of
     Abs _ _ -> True
+    TmTrue -> True
+    TmFalse -> True
     _ -> False
 
 
@@ -120,61 +134,79 @@ mapOnId onId c t =
 
       App t1 t2 ->
         App (walk c_ t1) (walk c_ t2)
+
+      TmIf cnd et ef ->
+        TmIf (walk c_ cnd) (walk c_ et) (walk c_ ef)
+
+      others ->
+        others
   in
     walk c t
 
 toString : Term -> String
 toString =
-  toStringWithContext []
+  let
+    withContext : NamingContext -> Term -> String
+    withContext ctx term =
+      case term of
+        Id k ->
+          indexToName ctx k
 
-toStringWithContext : NamingContext -> Term -> String
-toStringWithContext ctx term =
-  case term of
-    Id k ->
-      indexToName ctx k
+        Abs _ _ ->
+          let ( absList, inner ) = absHelp [] ctx term in
+          "λ" ++ (absList |> List.reverse |> String.join " ") ++ "." ++ inner
 
-    Abs _ _ ->
-      let ( absList, inner ) = toStringAbsHelp [] ctx term in
-      "λ" ++ (absList |> List.reverse |> String.join " ") ++ "." ++ inner
+        App lhs rhs ->
+          let
+            lhsInner = withContext ctx lhs
+            lhsParren =
+              case lhs of
+                Abs _ _ -> True
+                _ -> False
+            lhsStr =
+              if lhsParren
+              then "(" ++ lhsInner ++ ")"
+              else lhsInner
 
-    App lhs rhs ->
-      let
-        lhsInner = toStringWithContext ctx lhs
-        lhsParren =
-          case lhs of
-            Abs _ _ -> True
-            _ -> False
-        lhsStr =
-          if lhsParren
-          then "(" ++ lhsInner ++ ")"
-          else lhsInner
+            rhsInner = withContext ctx rhs
+            rhsParen =
+              case rhs of
+                Abs _ _ -> True
+                App _ _ -> True
+                _ -> False
+            rhsStr =
+              if rhsParen
+              then "(" ++ rhsInner ++ ")"
+              else rhsInner
 
-        rhsInner = toStringWithContext ctx rhs
-        rhsParen =
-          case rhs of
-            Abs _ _ -> True
-            App _ _ -> True
-            _ -> False
-        rhsStr =
-          if rhsParen
-          then "(" ++ rhsInner ++ ")"
-          else rhsInner
+            interLR =
+              if lhsParren || rhsParen
+              then ""
+              else " "
+          in
+            lhsStr ++ interLR ++ rhsStr
 
-        interLR =
-          if lhsParren || rhsParen
-          then ""
-          else " "
-      in
-        lhsStr ++ interLR ++ rhsStr
+        TmTrue ->
+          "True"
 
-toStringAbsHelp : List String -> NamingContext -> Term -> ( List String, String )
-toStringAbsHelp absList ctx exp =
-  case exp of
-    Abs nameHint t ->
-      let ( ctx_, varName ) = pickFreshName ctx nameHint in
-      toStringAbsHelp (varName :: absList) ctx_ t
+        TmFalse ->
+          "False"
 
-    _ -> ( absList, toStringWithContext ctx exp )
+        TmIf c t f ->
+          "if "++withContext ctx c++
+          " then "++withContext ctx t++
+          " else "++withContext ctx f
+
+    absHelp : List String -> NamingContext -> Term -> ( List String, String )
+    absHelp absList ctx exp =
+      case exp of
+        Abs nameHint t ->
+          let ( ctx_, varName ) = pickFreshName ctx nameHint in
+          absHelp (varName :: absList) ctx_ t
+
+        _ -> ( absList, withContext ctx exp )
+  in
+    withContext []
 
 pickFreshName : NamingContext -> String -> ( NamingContext, String )
 pickFreshName ctx nameHint =
@@ -212,6 +244,20 @@ fromString src =
             rExp = withContext ctx rAst
           in
             Result.map2 App lExp rExp
+
+        Ast.TmTrue ->
+          Ok TmTrue
+
+        Ast.TmFalse ->
+          Ok TmFalse
+
+        Ast.If c t v ->
+          let
+            c_ = withContext ctx c
+            t_ = withContext ctx t
+            v_ = withContext ctx v
+          in
+            Result.map3 TmIf c_ t_ v_
   in
     Ast.parse src
       |> Result.andThen (withContext [])

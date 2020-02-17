@@ -15,7 +15,7 @@ succ = Abs "n" (Abs "f" (Abs "x" (App (Id 1) (App (App (Id 2) (Id 1)) (Id 0)))))
 pred = Abs "n" (Abs "f" (Abs "x" (App (App (App (Id 0) (Abs "g" (Abs "h" (App (Id 4) (App (Id 3) (Id 1)))))) (Abs "u" (Id 2))) (Abs "u" (Id 3)))))
 zero = Abs "f" (Abs "x" (Id 0))
 one = Abs "f" (Abs "x" (App (Id 1) (Id 0)))
-
+not = Abs "b" (TmIf (Id 0) TmFalse TmTrue)
 
 suite : Test
 suite =
@@ -45,28 +45,37 @@ suite =
           succ
             |> toString
             |> Expect.equal "λn f x.f(n f x)"
+
+      , test "NOT" <| \_ ->
+          not
+            |> toString
+            |> Expect.equal "λb.if b then False else True"
       ]
 
   , describe "parse"
     [ test "S" <| \_ ->
-      fromString "λx y z.x z(y z)"
-        |> Expect.equal (Ok s)
+        fromString "λx y z.x z(y z)"
+          |> Expect.equal (Ok s)
 
     , test "K" <| \_ ->
-      fromString "λx y.x"
-        |> Expect.equal (Ok k)
+        fromString "λx y.x"
+          |> Expect.equal (Ok k)
 
     , test "I" <| \_ ->
-      fromString "λx.x"
-        |> Expect.equal (Ok i)
+        fromString "λx.x"
+          |> Expect.equal (Ok i)
 
     , test "Y" <| \_ ->
-      fromString "λf.(λx.f(x x))(λx.f(x x))"
-        |> Expect.equal (Ok y)
+        fromString "λf.(λx.f(x x))(λx.f(x x))"
+          |> Expect.equal (Ok y)
 
     , test "SUCC" <| \_ ->
-      fromString "λn f x.f(n f x)"
-        |> Expect.equal (Ok succ)
+        fromString "λn f x.f(n f x)"
+          |> Expect.equal (Ok succ)
+
+    , test "NOT" <| \_ ->
+        fromString "λb.if b then False else True"
+          |> Expect.equal (Ok not)
     ]
 
   , describe "eval"
@@ -84,5 +93,10 @@ suite =
       App i i
         |> eval
         |> Expect.equal i
+
+    , test "not True" <| \_ ->
+        App not TmTrue
+          |> eval
+          |> Expect.equal TmFalse
     ]
   ]

@@ -9,6 +9,9 @@ type Ast
   = Id String
   | Abs String Ast
   | App Ast Ast
+  | TmTrue
+  | TmFalse
+  | If Ast Ast Ast
 
 parse : String -> Result String Ast
 parse src =
@@ -28,11 +31,28 @@ pLambda = Peg.match "λ"
 pDot = Peg.match "."
 pLParen = Peg.match "("
 pRParen = Peg.match ")"
+pIf = Peg.match "if"
+pThen = Peg.match "then"
+pElse = Peg.match "else"
+
+keyword =
+  [ "True"
+  , "False"
+  , "if"
+  , "then"
+  , "else"
+  ]
 
 pName =
   Peg.seq2
   pNameHead pNameTail
   (\hd tl -> String.fromList (hd :: tl))
+    |> Peg.andThen (\name ->
+      if List.member name keyword
+      then Peg.fail
+      else Peg.return name
+    )
+
 pNameHead =
   Peg.char Char.isAlpha
 pNameTail =
@@ -63,12 +83,16 @@ pApp =
       Peg.choice
       [ \_ -> pId
       , \_ -> pParen
+      , \_ -> pTrue
+      , \_ -> pFalse
       ]
 
     pAExpTl =
       Peg.choice
       [ \_ -> Peg.seq2 pSp pId (\_ p -> p)
       , \_ -> Peg.seq2 pOpSp pParen (\_ p -> p)
+      , \_ -> Peg.seq2 pSp pTrue (\_ p -> p)
+      , \_ -> Peg.seq2 pSp pFalse (\_ p -> p)
       ]
   in
     Peg.seq3
@@ -80,9 +104,25 @@ pApp =
       rest
     )
 
+pTrue =
+  Peg.match "True"
+    |> Peg.map (always TmTrue)
+
+pFalse =
+  Peg.match "False"
+    |> Peg.map (always TmFalse)
+
+pIfExp =
+  Peg.intersperseSeq6 pSp
+  pIf pAst pThen pAst pElse pAst
+  (\_ c _ t _ f -> If c t f)
+
 pAst =
   Peg.choice
   [ \_ -> pApp
+  , \_ -> pTrue
+  , \_ -> pFalse
+  , \_ -> pIfExp
   , \_ -> pId
   , \_ -> pAbs
   ]
