@@ -1,23 +1,35 @@
 module Ast exposing
   ( Ast(..)
+  , Ty(..)
   , parse
+  , parseType
   )
 
 import Peg.Parser as Peg exposing (Parser)
 
 type Ast
   = Id String
-  | Abs String Ast
+  | Abs String Ty Ast
   | App Ast Ast
   | TmTrue
   | TmFalse
   | If Ast Ast Ast
+
+type Ty
+  = Arrow Ty Ty
+  | Atomic String
 
 parse : String -> Result String Ast
 parse src =
   case Peg.parse src pAst of
     Nothing -> Err "Parse Error"
     Just ast -> Ok ast
+
+parseType : String -> Result String Ty
+parseType src =
+  case Peg.parse src pType of
+    Nothing -> Err "Parse Error"
+    Just ty -> Ok ty
 
 pSp =
   Peg.char (\c -> List.member c spChars)
@@ -28,12 +40,14 @@ spChars =
 pOpSp = Peg.option pSp
 
 pLambda = Peg.match "λ"
-pDot = Peg.match "."
+pDot    = Peg.match "."
 pLParen = Peg.match "("
 pRParen = Peg.match ")"
-pIf = Peg.match "if"
-pThen = Peg.match "then"
-pElse = Peg.match "else"
+pColon  = Peg.match ":"
+pArrow  = Peg.match "->"
+pIf     = Peg.match "if"
+pThen   = Peg.match "then"
+pElse   = Peg.match "else"
 
 keyword =
   [ "True"
@@ -43,9 +57,17 @@ keyword =
   , "else"
   ]
 
-pName =
+pLower =
+  Peg.char Char.isAlpha
+pUpper =
+  Peg.char Char.isUpper
+pNameTail =
+  Peg.char (\c -> Char.isAlphaNum c || c == '_')
+    |> Peg.zeroOrMore
+
+nameHelper phead ptail =
   Peg.seq2
-  pNameHead pNameTail
+  phead ptail
   (\hd tl -> String.fromList (hd :: tl))
     |> Peg.andThen (\name ->
       if List.member name keyword
@@ -53,21 +75,36 @@ pName =
       else Peg.return name
     )
 
-pNameHead =
-  Peg.char Char.isAlpha
-pNameTail =
-  Peg.char (\c -> Char.isAlphaNum c || c == '_')
-    |> Peg.zeroOrMore
+pVarName =
+  nameHelper pLower pNameTail
+pTypeName =
+  nameHelper pUpper pNameTail
+
+pTypeExcludeArrow =
+  Peg.choice
+  [ \_ -> Peg.seq3 pLParen pType pRParen (\_ ty _ -> ty)
+  , \_ -> (pTypeName |> Peg.map (\name -> Atomic name))
+  ]
+pType =
+  Peg.choice
+  [ \_ -> Peg.seq3 pTypeExcludeArrow pArrow pType (\l _ r -> Arrow l r)
+  , \_ -> pTypeExcludeArrow
+  ]
+
+pVarDecl =
+  Peg.seq3
+  pVarName pColon pType
+  (\var _ ty -> ( var, ty ))
 
 pId =
-  pName |> Peg.map Id
+  pVarName |> Peg.map Id
 
 pAbs =
   Peg.seq4
-  pLambda (Peg.join pSp pName) pDot pAst
+  pLambda (Peg.join pSp pVarDecl) pDot pAst
   (\_ vars _ inner ->
     List.foldr
-    (\var inner_ -> Abs var inner_)
+    (\( name, ty ) inner_ -> Abs name ty inner_)
     inner
     vars
   )

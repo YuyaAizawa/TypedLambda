@@ -1,6 +1,8 @@
 module TypedLambda exposing
   ( Term(..)
+  , Ty(..)
   , alphaEq
+  , typeOf
   , eval
   , toString
   , fromString
@@ -8,26 +10,33 @@ module TypedLambda exposing
 
 import Ast exposing (Ast)
 
+type Ty
+  = TyFun Ty Ty
+  | TyBool
+  | TyAtomic String
+
 type Term
   = Id Int -- de Bruijn index
-  | Abs String Term -- variable name hint, content
+  | Abs String Ty Term -- variable name hint, type, content
   | App Term Term -- lhs, rhs
   | TmTrue
   | TmFalse
   | TmIf Term Term Term
 
-alphaEq : Term -> Term -> Bool
-alphaEq lhs rhs =
-  case ( lhs, rhs ) of
-    ( Id l, Id r ) -> l == r
-    ( Abs _ l, Abs _ r ) -> alphaEq l r
-    ( App ll lr, App rl rr ) -> alphaEq ll rl && alphaEq lr rr
-    ( TmTrue, TmTrue ) -> True
-    ( TmFalse, TmFalse ) -> True
-    ( TmIf lc lt lf , TmIf rc rt rf ) -> alphaEq lc rc && alphaEq lt rt && alphaEq lf rf
-    _ -> False
-
 type alias NamingContext = List String
+type alias TypingContext = List ( String, Ty )
+
+namingContextToString : NamingContext -> String
+namingContextToString ctx =
+  "[" ++ String.join ", " ctx ++ "]"
+typingContextToString : TypingContext -> String
+typingContextToString ctx =
+  let
+    ctx_ =
+      ctx
+        |> List.map (\(name, ty) -> name ++ ":" ++ typeToString ty)
+  in
+    "[" ++ String.join ", " ctx_ ++ "]"
 
 getId : String -> NamingContext -> Maybe Int
 getId name ctx =
@@ -43,9 +52,16 @@ getId name ctx =
   in
     help 0 ctx
 
---type Ty
---  = TyFun Ty Ty
---  | TyBool
+alphaEq : Term -> Term -> Bool
+alphaEq lhs rhs =
+  case ( lhs, rhs ) of
+    ( Id l, Id r ) -> l == r
+    ( Abs _ _ l, Abs _ _ r ) -> alphaEq l r
+    ( App ll lr, App rl rr ) -> alphaEq ll rl && alphaEq lr rr
+    ( TmTrue, TmTrue ) -> True
+    ( TmFalse, TmFalse ) -> True
+    ( TmIf lc lt lf , TmIf rc rt rf ) -> alphaEq lc rc && alphaEq lt rt && alphaEq lf rf
+    _ -> False
 
 eval : Term -> Term
 eval exp =
@@ -60,7 +76,7 @@ Call-by-value strategy evaluation
 evalStep : Term -> Maybe Term
 evalStep exp =
     case exp of
-      App ((Abs _ t) as abs) v ->
+      App ((Abs _ _ t) as abs) v ->
         if v |> isValue
         then
           shift (-1) 0 (substitute 0 (shift 1 0 v) t)
@@ -92,7 +108,7 @@ evalStep exp =
 
 isValue exp =
   case exp of
-    Abs _ _ -> True
+    Abs _ _ _ -> True
     TmTrue -> True
     TmFalse -> True
     _ -> False
@@ -129,8 +145,8 @@ mapOnId onId c t =
       Id k ->
         onId c_ k
 
-      Abs name t1 ->
-        Abs name (walk (c_ + 1) t1)
+      Abs name ty t1 ->
+        Abs name ty (walk (c_ + 1) t1)
 
       App t1 t2 ->
         App (walk c_ t1) (walk c_ t2)
@@ -143,6 +159,104 @@ mapOnId onId c t =
   in
     walk c t
 
+typeOf : Term -> Result String Ty
+typeOf t =
+  let
+    helper ctx t_ =
+      case t_ of
+        Id i ->
+          case ctx |> indexToType i of
+            Just ( _, ty ) ->
+              Ok ty
+
+            Nothing ->
+              Err (String.fromInt i ++ " on " ++ typingContextToString ctx)
+
+        Abs nameHint ty1 t2 ->
+          let
+            ctx_ = (nameHint, ty1) :: ctx
+            ty2r = helper ctx_ t2
+          in
+            ty2r
+              |> Result.map (\ty2 -> TyFun ty1 ty2)
+
+        App t1 t2 ->
+          let
+            ty1r = helper ctx t1
+            ty2r = helper ctx t2
+          in
+            ty1r |> Result.andThen (\ty1 ->
+              ty2r |> Result.andThen (\ty2 ->
+                case ty1 of
+                  TyFun ty11 ty12 ->
+                    if ty11 == ty2
+                    then Ok <| ty12
+                    else Err
+                      <| "type mismatch, param: "
+                      ++ typeToString ty1
+                      ++ ", arg: "
+                      ++ typeToString ty2
+
+                  _ ->
+                    Err
+                      <| "function type expected: "
+                      ++ toString t1
+              )
+            )
+
+        TmTrue ->
+          Ok TyBool
+
+        TmFalse ->
+          Ok TyBool
+
+        TmIf t1 t2 t3 ->
+          let
+            ty1r = helper ctx t1
+            ty2r = helper ctx t2
+            ty3r = helper ctx t3
+          in
+            ty1r |> Result.andThen (\ty1 ->
+              if ty1 == TyBool
+              then
+                ty2r |> Result.andThen (\ty2 ->
+                  ty3r |> Result.andThen (\ty3 ->
+                    if ty2 == ty3
+                    then Ok ty2
+                    else Err
+                      <| "type mismatch, then: "
+                      ++ typeToString ty2
+                      ++ ", else: "
+                      ++ typeToString ty3
+                  )
+                )
+              else
+                Err "conditional not a boolean"
+            )
+  in
+    helper [] t
+
+typeToString : Ty -> String
+typeToString ty =
+  case ty of
+    TyFun ty1 ty2 ->
+      let
+        str1 = typeToString ty1
+        str2 = typeToString ty2
+      in
+        case ty1 of
+          TyFun _ _ ->
+            "(" ++ str1 ++ ")->" ++ str2
+
+          _ ->
+            str1 ++ "->" ++ str2
+
+    TyBool ->
+      "Bool"
+
+    TyAtomic name ->
+      name
+
 toString : Term -> String
 toString =
   let
@@ -150,9 +264,9 @@ toString =
     withContext ctx term =
       case term of
         Id k ->
-          indexToName ctx k
+          ctx |> indexToName k
 
-        Abs _ _ ->
+        Abs _ _ _ ->
           let ( absList, inner ) = absHelp [] ctx term in
           "λ" ++ (absList |> List.reverse |> String.join " ") ++ "." ++ inner
 
@@ -161,7 +275,7 @@ toString =
             lhsInner = withContext ctx lhs
             lhsParren =
               case lhs of
-                Abs _ _ -> True
+                Abs _ _ _ -> True
                 _ -> False
             lhsStr =
               if lhsParren
@@ -171,7 +285,7 @@ toString =
             rhsInner = withContext ctx rhs
             rhsParen =
               case rhs of
-                Abs _ _ -> True
+                Abs _ _ _ -> True
                 App _ _ -> True
                 _ -> False
             rhsStr =
@@ -200,29 +314,56 @@ toString =
     absHelp : List String -> NamingContext -> Term -> ( List String, String )
     absHelp absList ctx exp =
       case exp of
-        Abs nameHint t ->
-          let ( ctx_, varName ) = pickFreshName ctx nameHint in
-          absHelp (varName :: absList) ctx_ t
+        Abs nameHint ty t ->
+          let
+            ( ctx_, varName ) = pickFreshName ctx nameHint
+            tyName = typeToString ty
+          in
+            absHelp ((varName ++ ":" ++ tyName) :: absList) ctx_ t
 
         _ -> ( absList, withContext ctx exp )
   in
     withContext []
 
 pickFreshName : NamingContext -> String -> ( NamingContext, String )
-pickFreshName ctx nameHint =
-  if List.member nameHint ctx
-  then pickFreshName ctx (nameHint ++ "'")
-  else ( nameHint :: ctx, nameHint )
+pickFreshName ctx hint =
+  if List.member hint ctx
+  then pickFreshName ctx (hint ++ "'")
+  else ( hint :: ctx, hint )
 
-indexToName ctx idx =
-  case ( ctx, idx ) of
-    ( varName :: _, 0 ) -> varName
-    ( _ :: tl, n ) -> indexToName tl (n-1)
-    ( [], n ) -> String.fromInt n
+listGet : Int -> List a -> Maybe a
+listGet idx binds =
+    case ( idx, binds ) of
+      ( _, []) -> Nothing
+      ( 0, a :: _) -> Just a
+      ( n, _ :: tl) -> listGet (n-1) tl
+
+indexToName : Int -> NamingContext -> String
+indexToName idx ctx =
+  listGet idx ctx
+    |> Maybe.withDefault ("index out of bounds: " ++ String.fromInt idx)
+
+indexToType : Int -> TypingContext -> Maybe ( String, Ty )
+indexToType =
+  listGet
 
 fromString : String -> Result String Term
 fromString src =
   let
+    tyFromAst ty =
+      case ty of
+        Ast.Arrow aTy1 aTy2 ->
+          let
+            ty1 = aTy1 |> tyFromAst
+            ty2 = aTy2 |> tyFromAst
+          in
+            TyFun ty1 ty2
+
+        Ast.Atomic str ->
+          if str == "Bool"
+          then TyBool
+          else TyAtomic str
+
     withContext ctx ast_ =
       case ast_ of
         Ast.Id name ->
@@ -232,11 +373,12 @@ fromString src =
             Just id ->
               Ok <| Id id
 
-        Ast.Abs var exp ->
+        Ast.Abs var ty exp ->
           let
             inner = withContext (var::ctx) exp
+            ty_ = tyFromAst ty
           in
-            Result.map (Abs var) inner
+            Result.map (Abs var ty_) inner
 
         Ast.App lAst rAst ->
           let

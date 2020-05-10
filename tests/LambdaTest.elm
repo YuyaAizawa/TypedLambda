@@ -6,16 +6,24 @@ import Test exposing (..)
 
 import TypedLambda exposing (..)
 
-s = Abs "x" (Abs "y" (Abs "z" (App (App (Id 2) (Id 0)) (App (Id 1 )(Id 0)))))
-k = Abs "x" (Abs "y" (Id 1))
-i = Abs "x" (Id 0)
-y = Abs "f" (App (Abs "x" (App (Id 1) (App (Id 0) (Id 0)))) (Abs "x" (App (Id 1) (App (Id 0) (Id 0)))))
+tyA = TyAtomic "A"
+tyB = TyAtomic "B"
+tyC = TyAtomic "C"
+tyAA = TyFun tyA tyA
+tyNat = TyFun tyAA (TyFun tyA tyA)
+tyAB = TyFun tyA tyB
+tyABC = TyFun tyA (TyFun tyB tyC)
 
-succ = Abs "n" (Abs "f" (Abs "x" (App (Id 1) (App (App (Id 2) (Id 1)) (Id 0)))))
-pred = Abs "n" (Abs "f" (Abs "x" (App (App (App (Id 0) (Abs "g" (Abs "h" (App (Id 4) (App (Id 3) (Id 1)))))) (Abs "u" (Id 2))) (Abs "u" (Id 3)))))
-zero = Abs "f" (Abs "x" (Id 0))
-one = Abs "f" (Abs "x" (App (Id 1) (Id 0)))
-not = Abs "b" (TmIf (Id 0) TmFalse TmTrue)
+s = Abs "x" tyABC (Abs "y" tyAB (Abs "z" tyA (App (App (Id 2) (Id 0)) (App (Id 1 )(Id 0)))))
+k = Abs "x" tyA (Abs "y" tyB (Id 1))
+i = Abs "x" tyA (Id 0)
+-- y = Abs "f" tyA (App (Abs "x" tyA (App (Id 1) (App (Id 0) (Id 0)))) (Abs "x" tyA (App (Id 1) (App (Id 0) (Id 0)))))
+
+succ = Abs "n" tyNat (Abs "f" tyAA (Abs "x" tyA (App (Id 1) (App (App (Id 2) (Id 1)) (Id 0)))))
+-- pred = Abs "n" (TyFun tyAA tyA) (Abs "f" tyAA (Abs "x" tyA (App (App (App (Id 0) (Abs "g" tyA (Abs "h" tyA (App (Id 4) (App (Id 3) (Id 1)))))) (Abs "u" tyA (Id 2))) (Abs "u" tyA (Id 3)))))
+zero = Abs "f" tyAA (Abs "x" tyA (Id 0))
+one = Abs "f" tyAA (Abs "x" tyA (App (Id 1) (Id 0)))
+not = Abs "b" TyBool (TmIf (Id 0) TmFalse TmTrue)
 
 suite : Test
 suite =
@@ -24,57 +32,57 @@ suite =
       [ test "S" <| \_ ->
           s
             |> toString
-            |> Expect.equal "λx y z.x z(y z)"
+            |> Expect.equal "λx:A->B->C y:A->B z:A.x z(y z)"
 
       , test "K" <| \_ ->
           k
             |> toString
-            |> Expect.equal "λx y.x"
+            |> Expect.equal "λx:A y:B.x"
 
       , test "I" <| \_ ->
           i
             |> toString
-            |> Expect.equal "λx.x"
+            |> Expect.equal "λx:A.x"
 
-      , test "Y" <| \_ ->
-          y
-            |> toString
-            |> Expect.equal "λf.(λx.f(x x))(λx.f(x x))"
+      --, test "Y" <| \_ ->
+      --    y
+      --      |> toString
+      --      |> Expect.equal "λf.(λx.f(x x))(λx.f(x x))"
 
       , test "SUCC" <| \_ ->
           succ
             |> toString
-            |> Expect.equal "λn f x.f(n f x)"
+            |> Expect.equal "λn:(A->A)->A->A f:A->A x:A.f(n f x)"
 
       , test "NOT" <| \_ ->
           not
             |> toString
-            |> Expect.equal "λb.if b then False else True"
+            |> Expect.equal "λb:Bool.if b then False else True"
       ]
 
   , describe "parse"
     [ test "S" <| \_ ->
-        fromString "λx y z.x z(y z)"
+        fromString "λx:A->B->C y:A->B z:A.x z(y z)"
           |> Expect.equal (Ok s)
 
     , test "K" <| \_ ->
-        fromString "λx y.x"
+        fromString "λx:A y:B.x"
           |> Expect.equal (Ok k)
 
     , test "I" <| \_ ->
-        fromString "λx.x"
+        fromString "λx:A.x"
           |> Expect.equal (Ok i)
 
-    , test "Y" <| \_ ->
-        fromString "λf.(λx.f(x x))(λx.f(x x))"
-          |> Expect.equal (Ok y)
+    --, test "Y" <| \_ ->
+    --    fromString "λf.(λx.f(x x))(λx.f(x x))"
+    --      |> Expect.equal (Ok y)
 
     , test "SUCC" <| \_ ->
-        fromString "λn f x.f(n f x)"
+        fromString "λn:(A->A)->A->A f:A->A x:A.f(n f x)"
           |> Expect.equal (Ok succ)
 
     , test "NOT" <| \_ ->
-        fromString "λb.if b then False else True"
+        fromString "λb:Bool.if b then False else True"
           |> Expect.equal (Ok not)
     ]
 
@@ -98,5 +106,17 @@ suite =
         App not TmTrue
           |> eval
           |> Expect.equal TmFalse
+    ]
+
+  , describe "typeOf"
+    [ test "S" <| \_ ->
+      s
+        |> typeOf
+        |> Expect.equal (Ok (TyFun tyABC <| TyFun tyAB <| TyFun tyA tyC))
+
+    , test "SUCC" <| \_ ->
+      succ
+        |> typeOf
+        |> Expect.equal (Ok (TyFun tyNat tyNat))
     ]
   ]
