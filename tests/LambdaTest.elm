@@ -48,6 +48,10 @@ suite =
       --    y
       --      |> toString
       --      |> Expect.equal "λf.(λx.f(x x))(λx.f(x x))"
+      , test "ZERO" <| \_ ->
+          zero
+              |> toString
+              |> Expect.equal "λf:A->A x:A.x"
 
       , test "SUCC" <| \_ ->
           succ
@@ -76,6 +80,10 @@ suite =
     --, test "Y" <| \_ ->
     --    fromString "λf.(λx.f(x x))(λx.f(x x))"
     --      |> Expect.equal (Ok y)
+
+    , test "ZERO" <| \_ ->
+      fromString "λf:A->A x:A.x"
+        |> Expect.equal (Ok zero)
 
     , test "SUCC" <| \_ ->
         fromString "λn:(A->A)->A->A f:A->A x:A.f(n f x)"
@@ -118,5 +126,13 @@ suite =
       succ
         |> typeOf
         |> Expect.equal (Ok (TyFun tyNat tyNat))
+
+    ]
+
+  , describe "let"
+    [ test "typeOf SUCC ZERO" <| \_ ->
+      fromString "let zero = λf:A->A x:A.x in let succ = λn:(A->A)->A->A f:A->A x:A.f(n f x) in succ zero"
+        |> Result.andThen typeOf
+        |> Expect.equal (Ok tyNat)
     ]
   ]

@@ -393,13 +393,23 @@ fromString src =
         Ast.TmFalse ->
           Ok TmFalse
 
-        Ast.If c t v ->
+        Ast.If c t f ->
           let
             c_ = withContext ctx c
             t_ = withContext ctx t
-            v_ = withContext ctx v
+            f_ = withContext ctx f
           in
-            Result.map3 TmIf c_ t_ v_
+            Result.map3 TmIf c_ t_ f_
+
+        Ast.Let v d t ->
+          let
+            d_ = withContext ctx d
+            t_ = withContext (v::ctx) t
+            dty = d_ |> Result.andThen typeOf
+          in
+            Result.map3
+            (\d__ t__ dty_ -> App (Abs v dty_ t__) d__)
+            d_ t_ dty
   in
     Ast.parse src
       |> Result.andThen (withContext [])

@@ -14,6 +14,7 @@ type Ast
   | TmTrue
   | TmFalse
   | If Ast Ast Ast
+  | Let String Ast Ast
 
 type Ty
   = Arrow Ty Ty
@@ -44,10 +45,13 @@ pDot    = Peg.match "."
 pLParen = Peg.match "("
 pRParen = Peg.match ")"
 pColon  = Peg.match ":"
+pEq     = Peg.match "="
 pArrow  = Peg.match "->"
 pIf     = Peg.match "if"
 pThen   = Peg.match "then"
 pElse   = Peg.match "else"
+pLet    = Peg.match "let"
+pIn     = Peg.match "in"
 
 keyword =
   [ "True"
@@ -55,6 +59,8 @@ keyword =
   , "if"
   , "then"
   , "else"
+  , "let"
+  , "in"
   ]
 
 pLower =
@@ -154,12 +160,24 @@ pIfExp =
   pIf pAst pThen pAst pElse pAst
   (\_ c _ t _ f -> If c t f)
 
+pLetExp =
+  let
+    pVarDef =
+      Peg.intersperseSeq3 pOpSp pVarName pEq pAst
+      (\var _ def -> ( var, def ))
+  in
+    Peg.intersperseSeq4 pSp pLet pVarDef pIn pAst
+    (\_ ( var, def ) _ t -> Let var def t)
+
+
+
 pAst =
   Peg.choice
   [ \_ -> pApp
   , \_ -> pTrue
   , \_ -> pFalse
   , \_ -> pIfExp
+  , \_ -> pLetExp
   , \_ -> pId
   , \_ -> pAbs
   ]
