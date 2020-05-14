@@ -15,6 +15,7 @@ type Ast
   | TmFalse
   | If Ast Ast Ast
   | Let String Ast Ast
+  | Letrec String Ast Ast
 
 type Ty
   = Arrow Ty Ty
@@ -51,6 +52,7 @@ pIf     = Peg.match "if"
 pThen   = Peg.match "then"
 pElse   = Peg.match "else"
 pLet    = Peg.match "let"
+pLetrec = Peg.match "letrec"
 pIn     = Peg.match "in"
 
 keyword =
@@ -60,6 +62,7 @@ keyword =
   , "then"
   , "else"
   , "let"
+  , "letrec"
   , "in"
   ]
 
@@ -169,6 +172,14 @@ pLetExp =
     Peg.intersperseSeq4 pSp pLet pVarDef pIn pAst
     (\_ ( var, def ) _ t -> Let var def t)
 
+pLetrecExp =
+  let
+    pVarDef =
+      Peg.intersperseSeq3 pOpSp pVarName pEq pAst
+      (\var _ def -> ( var, def ))
+  in
+    Peg.intersperseSeq4 pSp pLetrec pVarDef pIn pAst
+    (\_ ( var, def ) _ t -> Letrec var def t)
 
 
 pAst =

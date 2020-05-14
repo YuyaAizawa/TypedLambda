@@ -22,6 +22,7 @@ type Term
   | TmTrue
   | TmFalse
   | TmIf Term Term Term
+  | Fix Term
 
 type alias NamingContext = List String
 type alias TypingContext = List ( String, Ty )
@@ -103,6 +104,14 @@ evalStep exp =
       TmIf c t f ->
         evalStep c
           |> Maybe.map (\c_ -> TmIf c_ t f)
+
+      Fix ((Abs _ _ t) as abs) ->
+        shift (-1) 0 (substitute 0 (shift 1 0 abs) t)
+          |> Just
+
+      Fix t ->
+        evalStep t
+          |> Maybe.map Fix
 
       _ -> Nothing
 
@@ -233,6 +242,19 @@ typeOf t =
               else
                 Err "conditional not a boolean"
             )
+
+        Fix t1 ->
+          helper ctx t1
+            |> Result.andThen (\ty ->
+              case ty of
+                TyFun ty1 ty2 ->
+                  if ty1 == ty2
+                  then Ok ty1
+                  else Err <| "cannot generate fixpoint: " ++ typeToString ty
+
+                _ ->
+                  Err <| "cannot generate fixpoint: " ++ typeToString ty
+            )
   in
     helper [] t
 
@@ -310,6 +332,9 @@ toString =
           "if "++withContext ctx c++
           " then "++withContext ctx t++
           " else "++withContext ctx f
+
+        Fix t ->
+          "fix "++withContext ctx t
 
     absHelp : List String -> NamingContext -> Term -> ( List String, String )
     absHelp absList ctx exp =
@@ -410,6 +435,16 @@ fromString src =
             Result.map3
             (\d__ t__ dty_ -> App (Abs v dty_ t__) d__)
             d_ t_ dty
+
+        Ast.Letrec v t1 t2 ->
+          let
+            t1_ = withContext ctx t1
+            t2_ = withContext (v::ctx) t2
+            ty1 = t1_ |> Result.andThen typeOf
+          in
+            Result.map3
+            (\t1__ t2__ ty1_ -> App (Abs v ty1_ t2__) (Fix (Abs v ty1_ t1__)))
+            t1_ t2_ ty1
   in
     Ast.parse src
       |> Result.andThen (withContext [])
