@@ -25,6 +25,16 @@ zero = Abs "f" tyAA (Abs "x" tyA (Id 0))
 one = Abs "f" tyAA (Abs "x" tyA (App (Id 1) (Id 0)))
 not = Abs "b" TyBool (TmIf (Id 0) TmFalse TmTrue)
 
+fact =
+  App
+  (Abs "fact" (TyFun TyI32 TyI32) (Id 0))
+  (Fix (
+    Abs "fact" (TyFun TyI32 TyI32) (
+      Abs "n" TyI32 (
+        TmIf (BuiltinBinOp EqI32 (Id 0) (TmI32 0))
+        (TmI32 1)
+        (BuiltinBinOp MulI32 (Id 0) (App (Id 1) (BuiltinBinOp SubI32 (Id 0) (TmI32 1))))))))
+
 suite : Test
 suite =
   describe "all"
@@ -44,10 +54,6 @@ suite =
             |> toString
             |> Expect.equal "λx:A.x"
 
-      --, test "Y" <| \_ ->
-      --    y
-      --      |> toString
-      --      |> Expect.equal "λf.(λx.f(x x))(λx.f(x x))"
       , test "ZERO" <| \_ ->
           zero
               |> toString
@@ -77,10 +83,6 @@ suite =
         fromString "λx:A.x"
           |> Expect.equal (Ok i)
 
-    --, test "Y" <| \_ ->
-    --    fromString "λf.(λx.f(x x))(λx.f(x x))"
-    --      |> Expect.equal (Ok y)
-
     , test "ZERO" <| \_ ->
       fromString "λf:A->A x:A.x"
         |> Expect.equal (Ok zero)
@@ -92,6 +94,10 @@ suite =
     , test "NOT" <| \_ ->
         fromString "λb:Bool.if b then False else True"
           |> Expect.equal (Ok not)
+
+    , test "factorial" <| \_ ->
+        fromString "letrec fact:I32->I32 = λn:I32.if eq n 0 then 1 else mul n (fact (sub n 1)) in fact"
+          |> Expect.equal (Ok fact)
     ]
 
   , describe "eval"
@@ -135,4 +141,11 @@ suite =
         |> Result.andThen typeOf
         |> Expect.equal (Ok tyNat)
     ]
+
+  , describe "letrec"
+          [ test "factorial" <| \_ ->
+            App fact (TmI32 5)
+              |> eval
+              |> Expect.equal (TmI32 120)
+          ]
   ]

@@ -1,9 +1,11 @@
 module TypedLambda exposing
   ( Term(..)
   , Ty(..)
+  , Bbo(..)
   , alphaEq
   , typeOf
   , eval
+  , evalStep
   , toString
   , fromString
   )
@@ -13,7 +15,36 @@ import Ast exposing (Ast)
 type Ty
   = TyFun Ty Ty
   | TyBool
+  | TyI32
   | TyAtomic String
+
+type Bbo
+  = AddI32
+  | SubI32
+  | MulI32
+  | EqI32
+
+bboToTy bbo =
+  case bbo of
+    AddI32 -> TyFun TyI32 (TyFun TyI32 TyI32)
+    SubI32 -> TyFun TyI32 (TyFun TyI32 TyI32)
+    MulI32 -> TyFun TyI32 (TyFun TyI32 TyI32)
+    EqI32 -> TyFun TyI32 (TyFun TyI32 TyBool)
+
+bboToString bbo =
+  case bbo of
+    AddI32 -> "add"
+    SubI32 -> "sub"
+    MulI32 -> "mul"
+    EqI32  -> "eq"
+
+bboFromString name =
+  case name of
+    "add" -> Just AddI32
+    "sub" -> Just SubI32
+    "mul" -> Just MulI32
+    "eq"  -> Just EqI32
+    _ -> Nothing
 
 type Term
   = Id Int -- de Bruijn index
@@ -21,8 +52,10 @@ type Term
   | App Term Term -- lhs, rhs
   | TmTrue
   | TmFalse
+  | TmI32 Int
   | TmIf Term Term Term
   | Fix Term
+  | BuiltinBinOp Bbo Term Term
 
 type alias NamingContext = List String
 type alias TypingContext = List ( String, Ty )
@@ -77,6 +110,7 @@ Call-by-value strategy evaluation
 evalStep : Term -> Maybe Term
 evalStep exp =
     case exp of
+
       App ((Abs _ _ t) as abs) v ->
         if v |> isValue
         then
@@ -106,12 +140,29 @@ evalStep exp =
           |> Maybe.map (\c_ -> TmIf c_ t f)
 
       Fix ((Abs _ _ t) as abs) ->
-        shift (-1) 0 (substitute 0 (shift 1 0 abs) t)
+        shift (-1) 0 (substitute 0 (shift 1 0 exp) t)
           |> Just
 
-      Fix t ->
-        evalStep t
-          |> Maybe.map Fix
+      BuiltinBinOp bbo t1 t2 ->
+              if t1 |> isValue |> not
+              then
+                evalStep t1
+                  |> Maybe.map (\t1_ -> BuiltinBinOp bbo t1_ t2)
+              else if t2 |> isValue |> not
+              then
+                evalStep t2
+                  |> Maybe.map (\t2_ -> BuiltinBinOp bbo t1 t2_)
+              else
+                case ( bbo, t1, t2 ) of
+                  ( AddI32, TmI32 i, TmI32 j ) -> TmI32 (i + j) |> Just
+                  ( SubI32, TmI32 i, TmI32 j ) -> TmI32 (i - j) |> Just
+                  ( MulI32, TmI32 i, TmI32 j ) -> TmI32 (i * j) |> Just
+                  (  EqI32, TmI32 i, TmI32 j ) ->
+                    if i == j
+                    then TmTrue |> Just
+                    else TmFalse |> Just
+
+                  _ -> Nothing
 
       _ -> Nothing
 
@@ -120,6 +171,7 @@ isValue exp =
     Abs _ _ _ -> True
     TmTrue -> True
     TmFalse -> True
+    TmI32 _ -> True
     _ -> False
 
 
@@ -163,8 +215,15 @@ mapOnId onId c t =
       TmIf cnd et ef ->
         TmIf (walk c_ cnd) (walk c_ et) (walk c_ ef)
 
+      Fix f ->
+        Fix (walk c_ f)
+
+      BuiltinBinOp bbo t1 t2 ->
+        BuiltinBinOp bbo (walk c_ t1) (walk c_ t2)
+
       others ->
         others
+
   in
     walk c t
 
@@ -219,6 +278,9 @@ typeOf t =
         TmFalse ->
           Ok TyBool
 
+        TmI32 _ ->
+          Ok TyI32
+
         TmIf t1 t2 t3 ->
           let
             ty1r = helper ctx t1
@@ -255,6 +317,14 @@ typeOf t =
                 _ ->
                   Err <| "cannot generate fixpoint: " ++ typeToString ty
             )
+
+        BuiltinBinOp bbo t1 t2 ->
+          case (typeOf t1, typeOf t2) of
+            ( Ok TyI32, Ok TyI32 ) ->
+              case bbo |> bboToTy of
+                TyFun _ (TyFun _ r) -> Ok r
+                _ -> Err <| "never happen"
+            _ -> Err <| "operand type mismatch"
   in
     helper [] t
 
@@ -275,6 +345,9 @@ typeToString ty =
 
     TyBool ->
       "Bool"
+
+    TyI32 ->
+      "I32"
 
     TyAtomic name ->
       name
@@ -328,13 +401,22 @@ toString =
         TmFalse ->
           "False"
 
+        TmI32 i ->
+          i |> String.fromInt
+
         TmIf c t f ->
           "if "++withContext ctx c++
           " then "++withContext ctx t++
           " else "++withContext ctx f
 
         Fix t ->
-          "fix "++withContext ctx t
+          "(fix "++withContext ctx t++")"
+
+        BuiltinBinOp bbo t1 t2 ->
+          "("++bboToString bbo
+          ++" "++withContext ctx t1
+          ++" "++withContext ctx t2
+          ++")"
 
     absHelp : List String -> NamingContext -> Term -> ( List String, String )
     absHelp absList ctx exp =
@@ -385,16 +467,26 @@ fromString src =
             TyFun ty1 ty2
 
         Ast.Atomic str ->
-          if str == "Bool"
-          then TyBool
-          else TyAtomic str
+          case str of
+            "Bool" -> TyBool
+            "I32"  -> TyI32
+            others -> TyAtomic others
 
+    appHelp ctx lAst rAst =
+      let
+        lExp = withContext ctx lAst
+        rExp = withContext ctx rAst
+      in
+        Result.map2 App lExp rExp
+
+    withContext : NamingContext -> Ast.Ast -> Result String Term
     withContext ctx ast_ =
       case ast_ of
         Ast.Id name ->
           case getId name ctx of
             Nothing ->
               Err <| "Missing identifier: " ++ name
+
             Just id ->
               Ok <| Id id
 
@@ -405,18 +497,30 @@ fromString src =
           in
             Result.map (Abs var ty_) inner
 
+        Ast.App ((Ast.App (Ast.Id name) t1) as t) t2 ->
+          case name |> bboFromString of
+            Nothing ->
+              appHelp ctx t t2
+
+            Just bbo ->
+              let
+                t1_ = withContext ctx t1
+                t2_ = withContext ctx t2
+              in
+                Result.map2 (BuiltinBinOp bbo) t1_ t2_
+
+
         Ast.App lAst rAst ->
-          let
-            lExp = withContext ctx lAst
-            rExp = withContext ctx rAst
-          in
-            Result.map2 App lExp rExp
+          appHelp ctx lAst rAst
 
         Ast.TmTrue ->
           Ok TmTrue
 
         Ast.TmFalse ->
           Ok TmFalse
+
+        Ast.TmInt i ->
+          Ok <| TmI32 i
 
         Ast.If c t f ->
           let
@@ -426,25 +530,33 @@ fromString src =
           in
             Result.map3 TmIf c_ t_ f_
 
-        Ast.Let v d t ->
+        Ast.Let x m n ->
+          -- let x = M in N
+          -- (λx:typeof M.N) M
           let
-            d_ = withContext ctx d
-            t_ = withContext (v::ctx) t
-            dty = d_ |> Result.andThen typeOf
+            m_ = withContext ctx m
+            n_ = withContext (x::ctx) n
+            tyM = m_ |> Result.andThen typeOf
           in
             Result.map3
-            (\d__ t__ dty_ -> App (Abs v dty_ t__) d__)
-            d_ t_ dty
+            (\m__ n__ tyM_ -> App (Abs x tyM_ n__) m__)
+            m_ n_ tyM
 
-        Ast.Letrec v t1 t2 ->
+        Ast.Letrec f ty m n ->
+          -- letrec f = M in N
+          -- let f = Fix (λf:typeof f.M) in N
+          -- (λf:typeof f.N)(Fix (λf:typeof f.M))
           let
-            t1_ = withContext ctx t1
-            t2_ = withContext (v::ctx) t2
-            ty1 = t1_ |> Result.andThen typeOf
+            lm =
+              Ast.Abs f ty m
+                |> withContext ctx
+            ln =
+              Ast.Abs f ty n
+                |> withContext ctx
           in
-            Result.map3
-            (\t1__ t2__ ty1_ -> App (Abs v ty1_ t2__) (Fix (Abs v ty1_ t1__)))
-            t1_ t2_ ty1
+            Result.map2
+            (\ln_ lm_ -> App ln_ (Fix lm_))
+            ln lm
   in
     Ast.parse src
       |> Result.andThen (withContext [])

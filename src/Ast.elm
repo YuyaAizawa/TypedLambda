@@ -13,9 +13,10 @@ type Ast
   | App Ast Ast
   | TmTrue
   | TmFalse
+  | TmInt Int
   | If Ast Ast Ast
   | Let String Ast Ast
-  | Letrec String Ast Ast
+  | Letrec String Ty Ast Ast
 
 type Ty
   = Arrow Ty Ty
@@ -66,6 +67,8 @@ keyword =
   , "in"
   ]
 
+pDigit =
+  Peg.char Char.isDigit
 pLower =
   Peg.char Char.isAlpha
 pUpper =
@@ -125,20 +128,25 @@ pApp =
       pLParen pAst pRParen
       (\_ inner _ -> inner)
 
-    pAExpHd =
+    pTermExceptParen =
       Peg.choice
       [ \_ -> pId
-      , \_ -> pParen
       , \_ -> pTrue
       , \_ -> pFalse
+      , \_ -> pInt
+      , \_ -> pParen
+      ]
+
+    pAExpHd =
+      Peg.choice
+      [ \_ -> pTermExceptParen
+      , \_ -> pParen
       ]
 
     pAExpTl =
       Peg.choice
-      [ \_ -> Peg.seq2 pSp pId (\_ p -> p)
+      [ \_ -> Peg.seq2 pSp pTermExceptParen (\_ p -> p)
       , \_ -> Peg.seq2 pOpSp pParen (\_ p -> p)
-      , \_ -> Peg.seq2 pSp pTrue (\_ p -> p)
-      , \_ -> Peg.seq2 pSp pFalse (\_ p -> p)
       ]
   in
     Peg.seq3
@@ -158,6 +166,15 @@ pFalse =
   Peg.match "False"
     |> Peg.map (always TmFalse)
 
+pInt =
+  pDigit
+    |> Peg.oneOrMore
+    |> Peg.andThen (\chars ->
+      case chars |> String.fromList |> String.toInt of
+        Just i -> Peg.return <| TmInt i
+        Nothing -> Peg.fail
+    )
+
 pIfExp =
   Peg.intersperseSeq6 pSp
   pIf pAst pThen pAst pElse pAst
@@ -175,20 +192,22 @@ pLetExp =
 pLetrecExp =
   let
     pVarDef =
-      Peg.intersperseSeq3 pOpSp pVarName pEq pAst
-      (\var _ def -> ( var, def ))
+      Peg.intersperseSeq3 pOpSp pVarDecl pEq pAst
+      (\( var, ty ) _ def -> ( var, ty, def ))
   in
     Peg.intersperseSeq4 pSp pLetrec pVarDef pIn pAst
-    (\_ ( var, def ) _ t -> Letrec var def t)
+    (\_ ( var, ty, def ) _ t -> Letrec var ty def t)
 
 
 pAst =
   Peg.choice
   [ \_ -> pApp
-  , \_ -> pTrue
-  , \_ -> pFalse
   , \_ -> pIfExp
   , \_ -> pLetExp
+  , \_ -> pLetrecExp
+  , \_ -> pTrue
+  , \_ -> pFalse
+  , \_ -> pInt
   , \_ -> pId
   , \_ -> pAbs
   ]
